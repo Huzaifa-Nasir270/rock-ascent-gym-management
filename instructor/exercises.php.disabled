@@ -1,0 +1,303 @@
+<?php
+/**
+ * Instructor - Manage Exercises (Media Support)
+ */
+
+require_once('../config/functions.php');
+requireInstructor();
+
+$instructorId = $_SESSION['instructor_id'];
+
+// Insert weight gain exercises if not present
+$weightGainExercises = [
+    ['name' => 'Bench Press', 'desc' => 'A compound exercise that targets the chest, shoulders, and triceps for building upper body strength.', 'diff' => 'Intermediate', 'media' => 'assets/images/Weight Gain/Bench Press.jpg'],
+    ['name' => 'Chest Fly', 'desc' => 'An isolation exercise focusing on the chest muscles to enhance muscle definition.', 'diff' => 'Intermediate', 'media' => 'assets/images/Weight Gain/Chest Fly.jpg'],
+    ['name' => 'Tricep Pushdown', 'desc' => 'Targets the triceps for arm development and strength.', 'diff' => 'Beginner', 'media' => 'assets/images/Weight Gain/Tricep Pushdown.jpg'],
+    ['name' => 'Bicep Curl', 'desc' => 'Isolates the biceps for building arm muscle mass.', 'diff' => 'Beginner', 'media' => 'assets/images/Weight Gain/Bicep Curl.jpg'],
+    ['name' => 'Hammer Curl', 'desc' => 'Works the biceps and forearms for balanced arm development.', 'diff' => 'Intermediate', 'media' => 'assets/images/Weight Gain/Hammer Curl.jpg'],
+    ['name' => 'Lat Pulldown', 'desc' => 'Strengthens the back muscles, particularly the lats, for overall upper body growth.', 'diff' => 'Intermediate', 'media' => 'assets/images/Weight Gain/Lat Pulldown.jpg'],
+    ['name' => 'Seated Row', 'desc' => 'Builds back strength and posture by targeting the middle back muscles.', 'diff' => 'Intermediate', 'media' => 'assets/images/Weight Gain/Seated Row.jpg']
+];
+
+foreach ($weightGainExercises as $ex) {
+    $stmt = $conn->prepare("SELECT exercise_id FROM exercises WHERE name = ? AND instructor_id IS NULL");
+    $stmt->bind_param("s", $ex['name']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows == 0) {
+        $stmt2 = $conn->prepare("INSERT INTO exercises (name, description, media_path, media_type, difficulty_level) VALUES (?, ?, ?, 'image', ?)");
+        $stmt2->bind_param("ssss", $ex['name'], $ex['desc'], $ex['media'], $ex['diff']);
+        $stmt2->execute();
+    }
+}
+
+// Handle Add/Edit Exercise
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
+    if ($_POST['action'] === 'add') {
+        $name = sanitize($_POST['name']);
+        $desc = sanitize($_POST['description']);
+        $diff = sanitize($_POST['difficulty_level']);
+        $mediaPath = sanitize($_POST['media_url']); // In a real app, handle file upload here. We use URL for simplicity/demo.
+        $mediaType = 'image'; // Can be expanded
+
+        $stmt = $conn->prepare("INSERT INTO exercises (instructor_id, name, description, media_path, media_type, difficulty_level) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("isssss", $instructorId, $name, $desc, $mediaPath, $mediaType, $diff);
+        
+        if ($stmt->execute()) {
+            redirect('exercises.php', 'Exercise added successfully!', 'success');
+        } else {
+            redirect('exercises.php', 'Failed to add exercise.', 'danger');
+        }
+    } elseif ($_POST['action'] === 'delete') {
+        $exId = sanitize($_POST['exercise_id']);
+        $stmt = $conn->prepare("DELETE FROM exercises WHERE exercise_id = ? AND instructor_id = ?");
+        $stmt->bind_param("ii", $exId, $instructorId);
+        $stmt->execute();
+        redirect('exercises.php', 'Exercise deleted.', 'success');
+    } elseif ($_POST['action'] === 'edit') {
+        $exId = sanitize($_POST['exercise_id']);
+        $name = sanitize($_POST['name']);
+        $desc = sanitize($_POST['description']);
+        $diff = sanitize($_POST['difficulty_level']);
+        $mediaPath = sanitize($_POST['media_url']);
+
+        $stmt = $conn->prepare("UPDATE exercises SET name=?, description=?, media_path=?, difficulty_level=? WHERE exercise_id=? AND instructor_id=?");
+        $stmt->bind_param("ssssii", $name, $desc, $mediaPath, $diff, $exId, $instructorId);
+        
+        if ($stmt->execute()) {
+            redirect('exercises.php', 'Exercise updated successfully!', 'success');
+        } else {
+            redirect('exercises.php', 'Failed to update exercise.', 'danger');
+        }
+    }
+}
+
+// Fetch exercises (own + system-wide)
+$exercises = $conn->query("SELECT * FROM exercises WHERE instructor_id = $instructorId OR instructor_id IS NULL ORDER BY instructor_id DESC, created_at DESC")->fetch_all(MYSQLI_ASSOC);
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Manage Exercises - Instructor</title>
+    <?php include('../includes/head.php'); ?>
+    <style>
+        .exercise-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .exercise-img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+        .exercise-img:hover {
+            transform: scale(1.05);
+        }
+        .lightbox-img {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        }
+        .ex-body {
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <?php include('../includes/header.php'); ?>
+
+    <div class="container-fluid">
+        <div class="dashboard-container">
+            <?php include('../includes/instructor_sidebar.php'); ?>
+
+            <div class="main-content">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="fas fa-dumbbell mr-2 text-warning"></i>Manage Exercises</h2>
+                    <button class="btn btn-primary" data-toggle="modal" data-target="#addExerciseModal">
+                        <i class="fas fa-plus mr-1"></i> Add Exercise
+                    </button>
+                </div>
+
+                <?php displayMessage(); ?>
+
+                <div class="row">
+                    <?php if(empty($exercises)): ?>
+                        <div class="col-12 text-center py-5">
+                            <i class="fas fa-image fa-3x text-muted mb-3"></i>
+                            <h4 class="text-muted">No exercises added yet.</h4>
+                            <p>Upload pictures or videos to create a library for your users.</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach($exercises as $ex): ?>
+                            <div class="col-md-4 col-lg-3">
+                                <div class="exercise-card">
+                                    <?php if(!empty($ex['media_path'])): 
+                                        $displayPath = (strpos($ex['media_path'], 'http') === 0) ? $ex['media_path'] : '../' . $ex['media_path'];
+                                    ?>
+                                        <img src="<?php echo htmlspecialchars($displayPath); ?>" 
+                                             onclick="previewImage('<?php echo htmlspecialchars($displayPath); ?>', '<?php echo htmlspecialchars($ex['name']); ?>')"
+                                             onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1517836357463-d25dfeac3438?q=80&w=500&auto=format&fit=crop';" 
+                                             class="exercise-img" alt="Exercise">
+                                    <?php else: ?>
+                                        <div class="exercise-img d-flex align-items-center justify-content-center bg-dark">
+                                            <i class="fas fa-camera fa-2x text-muted"></i>
+                                        </div>
+                                    <?php endif; ?>
+                                    <div class="ex-body">
+                                        <h5 class="mb-1"><?php echo htmlspecialchars($ex['name']); ?></h5>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <span class="badge badge-info"><?php echo htmlspecialchars($ex['difficulty_level']); ?></span>
+                                            <?php if($ex['instructor_id'] === NULL): ?>
+                                                <span class="badge badge-warning"><i class="fas fa-globe mr-1"></i> System</span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <p class="small text-muted mb-3" style="min-height:40px;"><?php echo htmlspecialchars(substr($ex['description'],0,60)); ?>...</p>
+                                        
+                                        <div class="btn-group w-100">
+                                            <?php if($ex['instructor_id'] == $instructorId): ?>
+                                                <button class="btn btn-sm btn-outline-warning" onclick='openEditModal(<?php echo json_encode($ex); ?>)'><i class="fas fa-edit"></i> Edit</button>
+                                                <form method="POST" onsubmit="return confirm('Delete this exercise?');" style="display:inline; width:50%;">
+                                                    <input type="hidden" name="action" value="delete">
+                                                    <input type="hidden" name="exercise_id" value="<?php echo $ex['exercise_id']; ?>">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger w-100 border-left-0" style="border-top-left-radius:0; border-bottom-left-radius:0;"><i class="fas fa-trash"></i> Delete</button>
+                                                </form>
+                                            <?php else: ?>
+                                                <button class="btn btn-sm btn-outline-secondary w-100" disabled><i class="fas fa-lock"></i> System Owned</button>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Modal -->
+    <div class="modal fade" id="addExerciseModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background: #1e293b; color: white;">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title">Add New Exercise</h5>
+                    <button type="button" class="close text-white" data-dismiss="modal"><span>&times;</span></button>
+                </div>
+                <form method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="action" value="add">
+                        <div class="form-group">
+                            <label>Exercise Name</label>
+                            <input type="text" name="name" class="form-control" required style="background: rgba(255,255,255,0.1); color:white; border:none;">
+                        </div>
+                        <div class="form-group">
+                            <label>Difficulty</label>
+                            <select name="difficulty_level" class="form-control" style="background: rgba(255,255,255,0.1); color:white; border:none;">
+                                <option value="Beginner">Beginner</option>
+                                <option value="Intermediate">Intermediate</option>
+                                <option value="Advanced">Advanced</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Media URL (Image/Video link)</label>
+                            <input type="text" name="media_url" class="form-control" placeholder="https://..." style="background: rgba(255,255,255,0.1); color:white; border:none;">
+                            <small class="text-muted">For the Final Year Project demo, paste an image link (e.g., from Unsplash).</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Instructions / Description</label>
+                            <textarea name="description" class="form-control" rows="3" required style="background: rgba(255,255,255,0.1); color:white; border:none;"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Exercise</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editExerciseModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background: #1e293b; color: white;">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title">Edit Exercise</h5>
+                    <button type="button" class="close text-white" data-dismiss="modal"><span>&times;</span></button>
+                </div>
+                <form method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="action" value="edit">
+                        <input type="hidden" name="exercise_id" id="edit_ex_id">
+                        <div class="form-group">
+                            <label>Exercise Name</label>
+                            <input type="text" name="name" id="edit_name" class="form-control" required style="background: rgba(255,255,255,0.1); color:white; border:none;">
+                        </div>
+                        <div class="form-group">
+                            <label>Difficulty</label>
+                            <select name="difficulty_level" id="edit_diff" class="form-control" style="background: rgba(255,255,255,0.1); color:white; border:none;">
+                                <option value="Beginner">Beginner</option>
+                                <option value="Intermediate">Intermediate</option>
+                                <option value="Advanced">Advanced</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Media URL (Image/Video link)</label>
+                            <input type="text" name="media_url" id="edit_media" class="form-control" placeholder="https://..." style="background: rgba(255,255,255,0.1); color:white; border:none;">
+                        </div>
+                        <div class="form-group">
+                            <label>Instructions / Description</label>
+                            <textarea name="description" id="edit_desc" class="form-control" rows="3" required style="background: rgba(255,255,255,0.1); color:white; border:none;"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-warning">Update Exercise</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div class="modal fade" id="imagePreviewModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content" style="background: rgba(15, 23, 42, 0.95); border: none; box-shadow: none;">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title" id="previewTitle" style="color: #f59e0b;"></h5>
+                    <button type="button" class="close text-white" data-dismiss="modal"><span>&times;</span></button>
+                </div>
+                <div class="modal-body text-center p-4">
+                    <img src="" id="previewImg" class="lightbox-img" alt="Preview">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?php include('../includes/footer.php'); ?>
+    <?php include('../includes/scripts.php'); ?>
+    <script>
+        function previewImage(url, title) {
+            $('#previewImg').attr('src', url);
+            $('#previewTitle').text(title);
+            $('#imagePreviewModal').modal('show');
+        }
+
+        function openEditModal(ex) {
+            $('#edit_ex_id').val(ex.exercise_id);
+            $('#edit_name').val(ex.name);
+            $('#edit_diff').val(ex.difficulty_level);
+            $('#edit_media').val(ex.media_path);
+            $('#edit_desc').val(ex.description);
+            $('#editExerciseModal').modal('show');
+        }
+    </script>
+</body>
+</html>
