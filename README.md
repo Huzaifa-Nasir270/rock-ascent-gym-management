@@ -152,15 +152,15 @@ After database setup, use these credentials to login:
 
 ### Admin
 - Email: `admin@gym.com`
-- Password: `password123`
+- Password: `Demod123`
 
 ### Instructor
 - Email: `instructor@gym.com`
-- Password: `password123`
+- Password: `Demo123`
 
 ### Member
 - Email: `user@gym.com`
-- Password: `password123`
+- Password: `Demo123`
 
 ## 📖 How to Use
 
